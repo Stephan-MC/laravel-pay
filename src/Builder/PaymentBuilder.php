@@ -3,7 +3,7 @@
 namespace Hachther\MeSomb\Builder;
 
 use Hachther\MeSomb\Helper\PaymentData;
-use Hachther\MeSomb\Payment;
+use Hachther\MeSomb\Operation\Payment\Collect;
 
 class PaymentBuilder
 {
@@ -39,11 +39,11 @@ class PaymentBuilder
     /**
      * Make Model Collect.
      *
-     * @return Hachther\MeSomb\Model\Collect
+     * @return \Hachther\MeSomb\Model\Payment
      */
     public function pay()
     {
-        $payment = (new Payment(
+        $payment = (new Collect(
             $this->payer,
             $this->amount,
             $this->service,

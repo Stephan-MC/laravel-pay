@@ -24,11 +24,39 @@ class Collect
     protected $url;
 
     /**
+     * Customer phone number in the local format.
+     *
+     * @var int|string
+     */
+    protected $payer;
+
+    /**
      * Collect Model.
      *
      * @var null|PaymentModel
      */
     protected $paymentModel;
+
+    /**
+     * Your service application key on MeSomb
+     *
+     * @var string $applicationKey
+     */
+    private string $applicationKey;
+
+    /**
+     * Your access key provided by MeSomb
+     *
+     * @var string $accessKey
+     */
+    private string $accessKey;
+
+    /**
+     * Your secret key provided by MeSomb
+     *
+     * @var string $secretKey
+     */
+    private string $secretKey;
 
 
     /**
@@ -53,6 +81,10 @@ class Collect
         ?string $message = null,
         ?string $redirect = null,
     ) {
+        $this->applicationKey = config('mesomb.app_key');
+        $this->secretKey = config('mesomb.secret_key');
+        $this->accessKey = config('mesomb.access_key');
+
         $this->generateURL();
 
         $this->payer = trim($payer, '+');
@@ -127,25 +159,36 @@ class Collect
     public function pay(): ?PaymentModel
     {
         $data = $this->prepareData();
+        $data['source'] = 'Laravel/v'.\app()->version();
+        $ip = request()->ip();
+        if (empty($data['location'])) {
+            $data['location'] = array(
+                'ip' => $ip
+            );
+        }
         $nonce = Signature::nonceGenerator();
         $date = new \DateTime();
         $url = $this->generateURL();
 
-        $authorization = SignedRequest::getAuthorization('POST', $url, $date, $nonce, ['content-type' => 'application/json'], $data);
+        $credentials = ['accessKey' => $this->accessKey, 'secretKey' => $this->secretKey];
+        $authorization = Signature::signRequest('payment', 'POST', $url, $date, $nonce, $credentials, ['content-type' => 'application/json'], $data);
 
         $headers = [
             'x-mesomb-date' => $date->getTimestamp(),
             'x-mesomb-nonce' => $nonce,
             'Authorization' => $authorization,
             'Content-Type' => 'application/json',
-            'X-MeSomb-Application' => config('mesomb.key'),
+            'X-MeSomb-Application' => $this->applicationKey,
             'X-MeSomb-OperationMode' => config('mesomb.mode'),
             'X-MeSomb-TrxID' => $this->paymentModel->id,
         ];
 
         $response = Http::withHeaders($headers)
-            ->timeout(config('mesomb.timeout'))
-            ->post($url, $data);
+            ->timeout(config('mesomb.timeout'));
+        if (!config('mesomb.ssl_verify')) {
+            $response = $response->withoutVerifying();
+        }
+        $response = $response->post($url, $data);
 
         if ($response->failed()) {
             $this->handleException($response);
@@ -202,5 +245,23 @@ class Collect
     public function setProduct(array $product)
     {
         $this->product = $product;
+    }
+
+    public function setApplicationKey(string $applicationKey): Collect
+    {
+        $this->applicationKey = $applicationKey;
+        return $this;
+    }
+
+    public function setAccessKey(string $accessKey): Collect
+    {
+        $this->accessKey = $accessKey;
+        return $this;
+    }
+
+    public function setSecretKey(string $secretKey): Collect
+    {
+        $this->secretKey = $secretKey;
+        return $this;
     }
 }

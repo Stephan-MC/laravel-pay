@@ -2,18 +2,18 @@
 
 namespace Hachther\MeSomb\Operation\Payment;
 
+use Hachther\MeSomb\Helper\PaymentData;
 use Hachther\MeSomb\Operation\Signature;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Http;
 use Hachther\MeSomb\Helper\HandleExceptions;
 use Hachther\MeSomb\Helper\RecordTransaction;
-use Hachther\MeSomb\Helper\SignedRequest;
 use Hachther\MeSomb\Model\Deposit as DepositModel;
 
 class Deposit
 {
-    use HandleExceptions, RecordTransaction;
+    use HandleExceptions, PaymentData, RecordTransaction;
 
     /**
      * Deposit URL.
@@ -23,11 +23,32 @@ class Deposit
     protected $url;
 
     /**
-     * Reference to add in the payment.
+     * Customer phone number in the local format.
      *
-     * @var string
+     * @var int|string
      */
-    protected $pin;
+    protected $receiver;
+
+    /**
+     * Your service application key on MeSomb
+     *
+     * @var string $applicationKey
+     */
+    private string $applicationKey;
+
+    /**
+     * Your access key provided by MeSomb
+     *
+     * @var string $accessKey
+     */
+    private string $accessKey;
+
+    /**
+     * Your secret key provided by MeSomb
+     *
+     * @var string $secretKey
+     */
+    private string $secretKey;
 
     /**
      * Deposit Model.
@@ -52,6 +73,10 @@ class Deposit
         string $currency = 'XAF',
         bool $conversion = true,
     ) {
+        $this->applicationKey = config('mesomb.app_key');
+        $this->secretKey = config('mesomb.secret_key');
+        $this->accessKey = config('mesomb.access_key');
+
         $this->generateURL();
 
         $this->receiver = $receiver;
@@ -83,8 +108,6 @@ class Deposit
     {
         $this->depositModel = DepositModel::create($data);
 
-        $data['pin'] = config('mesomb.pin');
-
         return $data;
     }
 
@@ -100,9 +123,12 @@ class Deposit
             'currency'  => $this->currency,
             'conversion'  => $this->conversion,
             'receiver'=> trim($this->receiver, '+'),
+            'customer'=> $this->customer,
+            'location'=> $this->location,
+            'product'=> $this->product,
         ];
 
-        return array_filter($this->saveDeposit($data));
+        return array_filter($this->saveDeposit($data), fn ($val) => ! is_null($val));
     }
 
     /**
@@ -125,25 +151,35 @@ class Deposit
     public function pay(): DepositModel
     {
         $data = $this->prepareData();
+        $data['source'] = 'Laravel/v'.\app()->version();
+        $ip = request()->ip();
+        if (empty($data['location'])) {
+            $data['location'] = array(
+                'ip' => $ip
+            );
+        }
         $nonce = Signature::nonceGenerator();
         $date = new \DateTime();
         $url = $this->generateURL();
 
-        $authorization = SignedRequest::getAuthorization('POST', $url, $date, $nonce, ['content-type' => 'application/json'], $data);
+        $credentials = ['accessKey' => $this->accessKey, 'secretKey' => $this->secretKey];
+        $authorization = Signature::signRequest('payment', 'POST', $url, $date, $nonce, $credentials, ['content-type' => 'application/json'], $data);
 
         $headers = [
             'x-mesomb-date' => $date->getTimestamp(),
             'x-mesomb-nonce' => $nonce,
             'Authorization' => $authorization,
             'Content-Type' => 'application/json',
-            'X-MeSomb-Application' => config('mesomb.key'),
+            'X-MeSomb-Application' => $this->applicationKey,
             'X-MeSomb-TrxID' => $this->depositModel->id,
         ];
 
         $response = Http::withHeaders($headers)
-            ->timeout(config('mesomb.timeout'))
-            ->post($url, $data);
-
+            ->timeout(config('mesomb.timeout'));
+        if (!config('mesomb.ssl_verify')) {
+            $response = $response->withoutVerifying();
+        }
+        $response = $response->post($url, $data);
 
         if ($response->failed()) {
             $this->handleException($response);
@@ -152,5 +188,52 @@ class Deposit
         $this->recordDeposit($response->json(), $nonce);
 
         return $this->depositModel;
+    }
+
+    /**
+     * Details on the customer performing the payment. This will help MeSomb to build for you analytics based on customer (Example: Top N customers)
+     *
+     * @param array<string, string> $customer = {'email': string, 'phone': string, 'town': string, 'region': string, 'country': string, 'first_name': string, 'last_name': string, 'address': string
+     */
+    public function setCustomer(array $customer): void
+    {
+        $this->customer = $customer;
+    }
+
+    /**
+     * Location for where the transaction was done. This will help MeSomb to build for you location based analytics based on customer (Example: transactions per region)
+     *
+     * @param array<string, string> $location {'town': string, 'region': string, 'country': string}
+     * @return void
+     */
+    public function setLocation(array $location): void
+    {
+        $this->location = $location;
+    }
+
+    /**
+     * Give details on the product purchase will help for product-based analytics
+     *
+     * @param array $product {'id': string, 'name': string, 'category': string }
+     * @return void
+     */
+    public function setProduct(array $product)
+    {
+        $this->product = $product;
+    }
+
+    public function setApplicationKey(string $applicationKey): void
+    {
+        $this->applicationKey = $applicationKey;
+    }
+
+    public function setAccessKey(string $accessKey): void
+    {
+        $this->accessKey = $accessKey;
+    }
+
+    public function setSecretKey(string $secretKey): void
+    {
+        $this->secretKey = $secretKey;
     }
 }
