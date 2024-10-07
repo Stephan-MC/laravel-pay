@@ -5,7 +5,6 @@ namespace Hachther\MeSomb\Operation\Payment;
 use Hachther\MeSomb\Helper\HandleExceptions;
 use Hachther\MeSomb\Helper\PaymentData;
 use Hachther\MeSomb\Helper\RecordTransaction;
-use Hachther\MeSomb\Helper\SignedRequest;
 use Hachther\MeSomb\Model\Payment as PaymentModel;
 use Hachther\MeSomb\Operation\Signature;
 use Illuminate\Support\Arr;
