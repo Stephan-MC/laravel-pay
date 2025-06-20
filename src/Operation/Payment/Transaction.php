@@ -3,7 +3,6 @@
 namespace Hachther\MeSomb\Operation\Payment;
 
 use DateTime;
-use Hachther\MeSomb\Helper\SignedRequest;
 use Hachther\MeSomb\Model\Payment;
 use Hachther\MeSomb\Operation\Signature;
 use Illuminate\Http\Client\RequestException;
@@ -75,7 +74,7 @@ class Transaction
         }
 
         if (empty($ids)) {
-            return;
+            return [];
         }
 
         $url = self::generateURL('transactions/', $ids);
